@@ -7,6 +7,7 @@ import {
   prepareImport,
 } from "./transfer.js";
 import { normalizeUrl, validateUrl, makeId } from "./domain.js";
+import { matchesSearchQuery, parseSearchQuery } from "./search.js";
 
 const root = document.querySelector("#app");
 const repository = createRepository();
@@ -17,6 +18,7 @@ const state = {
   query: "",
   activeTag: "",
   pendingImport: null,
+  selectedIds: new Set(),
 };
 
 root.innerHTML = `
@@ -46,10 +48,26 @@ root.innerHTML = `
           <div class="heading-count"><strong id="bookmark-count">0</strong><span>saved</span></div>
         </div>
         <div class="toolbar">
-          <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search titles, links, and tags" autocomplete="off" aria-label="Search bookmarks"><kbd>Ctrl K</kbd></label>
+          <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search titles, links, and tags" autocomplete="off" aria-label="Search bookmarks" aria-describedby="search-help query-feedback"><kbd>Ctrl K</kbd></label>
           <div class="toolbar-right"><label class="sort-label" for="sort">Sort</label><select id="sort" aria-label="Sort bookmarks"><option value="recent">Recently added</option><option value="title">Title A to Z</option><option value="site">Website</option></select></div>
         </div>
+        <p class="search-help" id="search-help">Use phrases, tag:, collection:, site:, and - to exclude. Terms are combined.</p>
+        <p class="query-feedback error-text" id="query-feedback" role="alert" hidden></p>
         <div id="active-tags" class="active-tags" aria-label="Tag filters"></div>
+        <section class="bulk-toolbar" aria-label="Bulk bookmark actions">
+          <div class="bulk-selection">
+            <label class="select-visible"><input id="select-visible" type="checkbox"> <span>Select visible results</span></label>
+            <span class="selection-count" id="selection-count" role="status" aria-live="polite">0 selected</span>
+            <button class="clear-selection" id="selection-clear" type="button" disabled>Clear selection</button>
+          </div>
+          <div class="bulk-actions">
+            <label class="bulk-control"><span>Move to</span><select id="bulk-collection" aria-label="Move selected bookmarks to"></select></label>
+            <button class="button button-quiet" id="bulk-move" type="button" disabled>Move</button>
+            <label class="bulk-control bulk-tags-control"><span>Add tags</span><input id="bulk-tags" type="text" placeholder="e.g. review, archive" aria-label="Tags to add to selected bookmarks" autocomplete="off"></label>
+            <button class="button button-quiet" id="bulk-tag" type="button" disabled>Add tags</button>
+            <button class="button button-danger" id="bulk-delete" type="button" disabled>Delete selected</button>
+          </div>
+        </section>
         <div id="bookmarks" class="bookmark-grid" aria-live="polite"></div>
         <div id="empty-state" class="empty-state" hidden><div class="empty-icon" aria-hidden="true">↗</div><h2 id="empty-title">Your shelf is ready</h2><p id="empty-copy">Save a link you want to come back to. It will stay on this device.</p><button class="button button-primary" id="empty-add" type="button">Add your first bookmark</button></div>
       </main>
@@ -70,6 +88,11 @@ root.innerHTML = `
   </dialog>
   <dialog id="import-dialog" class="dialog-card" aria-labelledby="import-dialog-title">
     <form id="import-form"><div class="dialog-heading"><div><p class="eyebrow">BRING YOUR LINKS</p><h2 id="import-dialog-title">Import bookmarks</h2></div><button class="icon-button" type="button" data-close="import-dialog" aria-label="Close">×</button></div><p class="dialog-copy">Choose an exported bookmarks HTML file or a LinkShelf or Chrome JSON file. Existing links are skipped.</p><label class="file-drop" for="import-file"><span class="file-icon" aria-hidden="true">↥</span><strong>Choose a file</strong><span id="file-name">HTML or JSON, up to 10 MB</span><input id="import-file" type="file" accept=".html,.htm,.json,text/html,application/json"></label><div id="import-preview" class="import-preview" hidden></div><div class="dialog-actions"><button class="button button-quiet" type="button" data-close="import-dialog">Cancel</button><button class="button button-primary" id="import-confirm" type="submit" disabled>Import bookmarks</button></div></form>
+  </dialog>
+  <dialog id="bulk-delete-dialog" class="dialog-card dialog-small" aria-labelledby="bulk-delete-title">
+    <div class="dialog-heading"><div><p class="eyebrow">DELETE BOOKMARKS</p><h2 id="bulk-delete-title">Delete selected bookmarks?</h2></div><button class="icon-button" type="button" data-close="bulk-delete-dialog" aria-label="Close">×</button></div>
+    <p class="dialog-copy" id="bulk-delete-copy"></p>
+    <div class="dialog-actions"><button class="button button-quiet" type="button" data-close="bulk-delete-dialog">Cancel</button><button class="button button-danger" id="bulk-delete-confirm" type="button">Delete bookmarks</button></div>
   </dialog>
   <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
 `;
@@ -92,6 +115,7 @@ const showToast = (message, tone = "success") => {
 };
 const openDialog = (id) => byId(id).showModal();
 const closeDialog = (id) => byId(id).close();
+const clearSelection = () => state.selectedIds.clear();
 
 async function refresh() {
   [state.collections, state.bookmarks] = await Promise.all([
@@ -103,6 +127,10 @@ async function refresh() {
     !state.collections.some((item) => item.id === state.selectedCollection)
   )
     state.selectedCollection = "all";
+  const existingIds = new Set(state.bookmarks.map((bookmark) => bookmark.id));
+  state.selectedIds = new Set(
+    [...state.selectedIds].filter((id) => existingIds.has(id)),
+  );
   render();
 }
 
@@ -146,17 +174,37 @@ function render() {
     .join("");
   if (state.collections.some((item) => item.id === currentCollection))
     collectionSelect.value = currentCollection;
-  const query = state.query.trim().toLocaleLowerCase();
+  const bulkCollection = byId("bulk-collection");
+  const currentBulkCollection = bulkCollection.value;
+  bulkCollection.innerHTML = state.collections
+    .map(
+      (item) =>
+        `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`,
+    )
+    .join("");
+  if (state.collections.some((item) => item.id === currentBulkCollection))
+    bulkCollection.value = currentBulkCollection;
+  let clauses = [];
+  let queryError = "";
+  try {
+    clauses = parseSearchQuery(state.query);
+  } catch (error) {
+    queryError = error.message;
+  }
+  byId("query-feedback").hidden = !queryError;
+  byId("query-feedback").textContent = queryError;
+  const collectionById = new Map(
+    state.collections.map((collection) => [collection.id, collection]),
+  );
   let visible = state.bookmarks.filter(
     (bookmark) =>
       state.selectedCollection === "all" ||
       bookmark.collectionId === state.selectedCollection,
   );
-  if (query)
+  if (queryError) visible = [];
+  else if (clauses.length)
     visible = visible.filter((bookmark) =>
-      [bookmark.title, bookmark.url, ...bookmark.tags].some((value) =>
-        value.toLocaleLowerCase().includes(query),
-      ),
+      matchesSearchQuery(bookmark, collectionById, clauses),
     );
   if (state.activeTag)
     visible = visible.filter((bookmark) =>
@@ -171,6 +219,10 @@ function render() {
             new URL(a.url).hostname.localeCompare(new URL(b.url).hostname)
         : (a, b) => b.addedAt.localeCompare(a.addedAt),
   );
+  const visibleIds = new Set(visible.map((bookmark) => bookmark.id));
+  state.selectedIds = new Set(
+    [...state.selectedIds].filter((id) => visibleIds.has(id)),
+  );
   byId("bookmarks").innerHTML = visible
     .map((bookmark) => {
       const host = new URL(bookmark.url).hostname.replace(/^www\./, "");
@@ -182,7 +234,7 @@ function render() {
             day: "numeric",
             year: "numeric",
           }).format(date);
-      return `<article class="bookmark-card"><div class="card-top"><span class="site-avatar" aria-hidden="true">${escapeHtml((host[0] ?? "↗").toUpperCase())}</span><div class="site-meta"><span class="site-name">${escapeHtml(host)}</span><span class="saved-date">Saved ${escapeHtml(saved)}</span></div><div class="card-actions"><button class="icon-button card-edit" data-edit="${escapeHtml(bookmark.id)}" type="button" aria-label="Edit ${escapeHtml(bookmark.title)}">✎</button><button class="icon-button card-delete" data-delete="${escapeHtml(bookmark.id)}" type="button" aria-label="Delete ${escapeHtml(bookmark.title)}">×</button></div></div><h2 class="card-title"><a href="${escapeHtml(bookmark.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bookmark.title)}</a></h2><p class="card-url">${escapeHtml(bookmark.url)}</p><div class="card-bottom"><span class="card-collection">${escapeHtml(state.collections.find((item) => item.id === bookmark.collectionId)?.name ?? "Unsorted")}</span><div class="tag-list">${bookmark.tags.map((tag) => `<button class="tag-chip ${state.activeTag === tag ? "active" : ""}" type="button" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join("")}</div></div></article>`;
+      return `<article class="bookmark-card"><div class="card-top"><label class="bookmark-select"><input data-select="${escapeHtml(bookmark.id)}" type="checkbox" aria-label="Select ${escapeHtml(bookmark.title)}" ${state.selectedIds.has(bookmark.id) ? "checked" : ""}><span class="sr-only">Select bookmark</span></label><span class="site-avatar" aria-hidden="true">${escapeHtml((host[0] ?? "↗").toUpperCase())}</span><div class="site-meta"><span class="site-name">${escapeHtml(host)}</span><span class="saved-date">Saved ${escapeHtml(saved)}</span></div><div class="card-actions"><button class="icon-button card-edit" data-edit="${escapeHtml(bookmark.id)}" type="button" aria-label="Edit ${escapeHtml(bookmark.title)}">✎</button><button class="icon-button card-delete" data-delete="${escapeHtml(bookmark.id)}" type="button" aria-label="Delete ${escapeHtml(bookmark.title)}">×</button></div></div><h2 class="card-title"><a href="${escapeHtml(bookmark.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(bookmark.title)}</a></h2><p class="card-url">${escapeHtml(bookmark.url)}</p><div class="card-bottom"><span class="card-collection">${escapeHtml(state.collections.find((item) => item.id === bookmark.collectionId)?.name ?? "Unsorted")}</span><div class="tag-list">${bookmark.tags.map((tag) => `<button class="tag-chip ${state.activeTag === tag ? "active" : ""}" type="button" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join("")}</div></div></article>`;
     })
     .join("");
   const tags = [
@@ -194,13 +246,22 @@ function render() {
   const isEmpty = visible.length === 0;
   byId("empty-state").hidden = !isEmpty;
   byId("bookmarks").hidden = isEmpty;
+  const selectedVisibleCount = visible.filter((bookmark) =>
+    state.selectedIds.has(bookmark.id),
+  ).length;
+  const selectVisible = byId("select-visible");
+  selectVisible.checked = visible.length > 0 && selectedVisibleCount === visible.length;
+  selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
+  selectVisible.disabled = visible.length === 0;
+  byId("selection-count").textContent = `${state.selectedIds.size} selected`;
+  byId("selection-clear").disabled = state.selectedIds.size === 0;
+  for (const id of ["bulk-move", "bulk-tag", "bulk-delete"])
+    byId(id).disabled = state.selectedIds.size === 0;
+  byId("bulk-delete-copy").textContent = `${state.selectedIds.size} selected bookmark${state.selectedIds.size === 1 ? " will" : "s will"} be permanently deleted. This cannot be undone.`;
   const filtered = Boolean(
-    query ||
+    state.query.trim() ||
     state.activeTag ||
-    (state.selectedCollection !== "all" &&
-      state.bookmarks.some(
-        (item) => item.collectionId === state.selectedCollection,
-      )),
+    state.selectedCollection !== "all",
   );
   byId("empty-title").textContent = filtered
     ? "No bookmarks found"
@@ -256,6 +317,7 @@ document.addEventListener("click", async (event) => {
   }
   const collection = event.target.closest("[data-collection]");
   if (collection) {
+    clearSelection();
     state.selectedCollection = collection.dataset.collection;
     state.activeTag = "";
     render();
@@ -276,6 +338,7 @@ document.addEventListener("click", async (event) => {
         confirm(`Delete “${existing.name}” and move its bookmarks to Unsorted?`)
       ) {
         await repository.deleteCollection(existing.id);
+        clearSelection();
         state.selectedCollection = "all";
         await refresh();
         showToast("Collection deleted; bookmarks moved to Unsorted.");
@@ -283,6 +346,7 @@ document.addEventListener("click", async (event) => {
     } else {
       try {
         const changed = await repository.renameCollection(existing.id, action);
+        clearSelection();
         await refresh();
         showToast(`Collection renamed to ${changed.name}.`);
       } catch (error) {
@@ -293,12 +357,14 @@ document.addEventListener("click", async (event) => {
   }
   const tag = event.target.closest("[data-tag]");
   if (tag) {
+    clearSelection();
     state.activeTag =
       state.activeTag === tag.dataset.tag ? "" : tag.dataset.tag;
     render();
     return;
   }
   if (event.target.closest("[data-clear-tag]")) {
+    clearSelection();
     state.activeTag = "";
     render();
     return;
@@ -317,8 +383,78 @@ document.addEventListener("click", async (event) => {
 });
 
 byId("search").addEventListener("input", (event) => {
+  clearSelection();
   state.query = event.target.value;
   render();
+});
+byId("select-visible").addEventListener("change", (event) => {
+  const visibleIds = [...document.querySelectorAll("#bookmarks [data-select]")].map(
+    (input) => input.dataset.select,
+  );
+  for (const id of visibleIds) {
+    if (event.target.checked) state.selectedIds.add(id);
+    else state.selectedIds.delete(id);
+  }
+  render();
+});
+byId("bookmarks").addEventListener("change", (event) => {
+  const checkbox = event.target.closest("[data-select]");
+  if (!checkbox) return;
+  const selectedId = checkbox.dataset.select;
+  if (checkbox.checked) state.selectedIds.add(selectedId);
+  else state.selectedIds.delete(selectedId);
+  render();
+  [...byId("bookmarks").querySelectorAll("[data-select]")]
+    .find((input) => input.dataset.select === selectedId)
+    ?.focus();
+});
+byId("selection-clear").addEventListener("click", () => {
+  clearSelection();
+  render();
+});
+byId("bulk-move").addEventListener("click", async () => {
+  const ids = [...state.selectedIds];
+  if (!ids.length) return;
+  try {
+    const count = await repository.moveBookmarks(
+      ids,
+      byId("bulk-collection").value,
+    );
+    clearSelection();
+    await refresh();
+    showToast(`${count} bookmark${count === 1 ? "" : "s"} moved.`);
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+});
+byId("bulk-tag").addEventListener("click", async () => {
+  const ids = [...state.selectedIds];
+  if (!ids.length) return;
+  try {
+    const count = await repository.addTagsToBookmarks(ids, byId("bulk-tags").value);
+    clearSelection();
+    byId("bulk-tags").value = "";
+    await refresh();
+    showToast(`Tags added to ${count} bookmark${count === 1 ? "" : "s"}.`);
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+});
+byId("bulk-delete").addEventListener("click", () => {
+  if (state.selectedIds.size) openDialog("bulk-delete-dialog");
+});
+byId("bulk-delete-confirm").addEventListener("click", async () => {
+  const ids = [...state.selectedIds];
+  if (!ids.length) return;
+  try {
+    const count = await repository.deleteBookmarks(ids);
+    clearSelection();
+    closeDialog("bulk-delete-dialog");
+    await refresh();
+    showToast(`${count} bookmark${count === 1 ? "" : "s"} deleted.`);
+  } catch (error) {
+    showToast(error.message, "error");
+  }
 });
 byId("sort").addEventListener("change", render);
 document.addEventListener("keydown", (event) => {
@@ -363,6 +499,7 @@ byId("bookmark-form").addEventListener("submit", async (event) => {
   };
   try {
     await repository.saveBookmark(payload);
+    clearSelection();
     closeDialog("bookmark-dialog");
     await refresh();
     showToast(isEdit ? "Bookmark updated." : "Bookmark saved.");
@@ -376,6 +513,7 @@ byId("collection-form").addEventListener("submit", async (event) => {
     const item = await repository.createCollection(
       byId("collection-name").value,
     );
+    clearSelection();
     state.selectedCollection = item.id;
     closeDialog("collection-dialog");
     await refresh();

@@ -8,6 +8,40 @@ const DEFAULT_COLLECTION = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+function validateBookmarkIds(ids) {
+  if (!Array.isArray(ids) || ids.length === 0)
+    throw new Error("Select at least one bookmark.");
+  if (ids.some((id) => typeof id !== "string" || !id.trim()))
+    throw new Error("Every selected bookmark must have a valid ID.");
+  if (new Set(ids).size !== ids.length)
+    throw new Error("A bookmark was selected more than once.");
+  return [...ids];
+}
+
+function validateTags(tags) {
+  if (typeof tags !== "string" && !Array.isArray(tags))
+    throw new Error("Enter one or more tags separated by commas.");
+  if (Array.isArray(tags) && tags.some((tag) => typeof tag !== "string"))
+    throw new Error("Tags must be text values.");
+  const values = (Array.isArray(tags) ? tags : tags.split(","))
+    .map((tag) => tag.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+  if (!values.length) throw new Error("Enter at least one tag.");
+  if (values.length > 20) throw new Error("Add no more than 20 tags at once.");
+  if (values.some((tag) => tag.length > 32))
+    throw new Error("Each tag must be 32 characters or fewer.");
+  return cleanTags(values);
+}
+
+async function readSelectedBookmarks(store, ids) {
+  const selected = await Promise.all(
+    ids.map((id) => requestResult(store.get(id))),
+  );
+  if (selected.some((bookmark) => !bookmark))
+    throw new Error("One or more selected bookmarks no longer exist. Refresh and try again.");
+  return selected;
+}
+
 function requestResult(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -233,6 +267,60 @@ export function createRepository(indexedDBApi = globalThis.indexedDB) {
     async deleteBookmark(id) {
       return mutate(["bookmarks"], (tx) => {
         tx.objectStore("bookmarks").delete(id);
+      });
+    },
+    async moveBookmarks(ids, collectionId) {
+      const selectedIds = validateBookmarkIds(ids);
+      if (typeof collectionId !== "string" || !collectionId.trim())
+        throw new Error("Choose a destination collection.");
+      return mutate(["collections", "bookmarks"], async (tx) => {
+        const [collection, selected] = await Promise.all([
+          requestResult(tx.objectStore("collections").get(collectionId)),
+          readSelectedBookmarks(tx.objectStore("bookmarks"), selectedIds),
+        ]);
+        if (!collection)
+          throw new Error("Choose an existing collection.");
+        const updatedAt = new Date().toISOString();
+        const changes = selected.map((bookmark) => ({
+          ...bookmark,
+          collectionId,
+          updatedAt,
+        }));
+        const store = tx.objectStore("bookmarks");
+        for (const bookmark of changes) store.put(bookmark);
+        return changes.length;
+      });
+    },
+    async addTagsToBookmarks(ids, tags) {
+      const selectedIds = validateBookmarkIds(ids);
+      const additions = validateTags(tags);
+      return mutate(["bookmarks"], async (tx) => {
+        const store = tx.objectStore("bookmarks");
+        const selected = await readSelectedBookmarks(store, selectedIds);
+        const changes = selected.map((bookmark) => {
+          const merged = cleanTags(bookmark.tags ?? []);
+          const known = new Set(merged.map((tag) => tag.toLocaleLowerCase()));
+          for (const tag of additions) {
+            const key = tag.toLocaleLowerCase();
+            if (known.has(key)) continue;
+            if (merged.length >= 20)
+              throw new Error(`“${bookmark.title}” already has the maximum of 20 tags.`);
+            merged.push(tag);
+            known.add(key);
+          }
+          return { ...bookmark, tags: merged, updatedAt: new Date().toISOString() };
+        });
+        for (const bookmark of changes) store.put(bookmark);
+        return changes.length;
+      });
+    },
+    async deleteBookmarks(ids) {
+      const selectedIds = validateBookmarkIds(ids);
+      return mutate(["bookmarks"], async (tx) => {
+        const store = tx.objectStore("bookmarks");
+        const selected = await readSelectedBookmarks(store, selectedIds);
+        for (const bookmark of selected) store.delete(bookmark.id);
+        return selected.length;
       });
     },
     async importBookmarks(records) {

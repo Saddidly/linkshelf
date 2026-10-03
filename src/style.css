@@ -326,7 +326,9 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 9px;
-  width: min(100%, 470px);
+  flex: 1 1 470px;
+  min-width: 0;
+  max-width: 470px;
   height: 43px;
   padding: 0 12px;
   border: 1px solid var(--line);
@@ -341,6 +343,7 @@ button:disabled {
 }
 .search-box input {
   width: 100%;
+  min-width: 0;
   height: 100%;
   border: 0;
   outline: 0 !important;
@@ -366,6 +369,7 @@ button:disabled {
   gap: 9px;
   color: #9aa49d;
   font-size: 11px;
+  flex-shrink: 0;
 }
 .toolbar-right select {
   padding: 8px 28px 8px 9px;
@@ -374,6 +378,117 @@ button:disabled {
   background: #fff;
   color: #59665f;
   font-size: 11px;
+}
+.search-help {
+  margin: -10px 0 13px;
+  color: #909b93;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.query-feedback {
+  margin: -4px 0 12px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.query-feedback[hidden] {
+  display: none;
+}
+.bulk-toolbar {
+  display: grid;
+  gap: 11px;
+  margin: 0 0 17px;
+  padding: 12px 14px;
+  border: 1px solid #e5eae2;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(38, 61, 47, 0.025);
+}
+.bulk-selection,
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.select-visible,
+.selection-count,
+.clear-selection,
+.bulk-control {
+  color: #647168;
+  font-size: 11px;
+}
+.select-visible,
+.bulk-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.select-visible input,
+.bookmark-select input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--green);
+}
+.selection-count {
+  color: #8a958d;
+  font-variant-numeric: tabular-nums;
+}
+.clear-selection {
+  padding: 4px 7px;
+  border: 0;
+  background: transparent;
+  color: #758179;
+  text-decoration: underline;
+}
+.bulk-control select,
+.bulk-control input {
+  width: auto;
+  min-width: 135px;
+  height: 35px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: #59665f;
+  font-size: 11px;
+}
+.bulk-control input {
+  width: 165px;
+}
+.bulk-tags-control {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.button-danger {
+  min-height: 38px;
+  background: #a9473e;
+  color: #fff;
+}
+.button-danger:hover {
+  background: #913b34;
+}
+.bookmark-select {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 34px;
+  border-radius: 5px;
+}
+.bookmark-select:focus-within {
+  outline: 3px solid #91bd62;
+  outline-offset: 1px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
 }
 .active-tags {
   display: flex;
@@ -877,6 +992,7 @@ button:disabled {
     gap: 9px;
   }
   .search-box {
+    width: auto;
     height: 40px;
     padding: 0 9px;
   }
@@ -893,6 +1009,39 @@ button:disabled {
     max-width: 130px;
     padding: 7px 20px 7px 7px;
     font-size: 10px;
+  }
+  .bulk-toolbar {
+    gap: 10px;
+    padding: 11px;
+  }
+  .bulk-selection {
+    gap: 7px;
+  }
+  .bulk-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+  }
+  .bulk-control {
+    justify-content: space-between;
+    min-width: 0;
+  }
+  .bulk-control select {
+    min-width: 0;
+    max-width: 150px;
+  }
+  .bulk-control input {
+    width: 100%;
+    min-width: 0;
+  }
+  .bulk-actions .button {
+    min-height: 36px;
+    padding: 0 10px;
+    white-space: nowrap;
+  }
+  #bulk-delete {
+    grid-column: 1 / -1;
   }
   .active-tags {
     gap: 5px;
