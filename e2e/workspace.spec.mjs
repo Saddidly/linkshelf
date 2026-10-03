@@ -1,0 +1,38 @@
+import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+
+test('bookmark persistence, search, transfer, and safe URL handling', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New collection', exact: true }).click();
+  await page.getByLabel('Collection name').fill('Reading');
+  await page.locator('#collection-form button[type=submit]').click();
+  await page.getByRole('button', { name: 'Add bookmark', exact: true }).click();
+  await page.getByLabel('URL', { exact: true }).fill('javascript:alert(1)');
+  await page.getByLabel('Title', { exact: true }).fill('Reference');
+  await page.getByRole('button', { name: 'Save bookmark', exact: true }).click();
+  await expect(page.locator('#bookmark-dialog')).toBeVisible();
+  await expect(page.locator('#url-feedback')).not.toHaveText('Paste a web address to save a page.');
+  await page.getByLabel('URL', { exact: true }).fill('https://example.org/reference?utm_source=test');
+  await page.getByRole('combobox', { name: 'Collection', exact: true }).selectOption({ label: 'Reading' });
+  await page.getByLabel('Tags', { exact: true }).fill('engineering, reading');
+  await page.getByRole('button', { name: 'Save bookmark', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Reference', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('link', { name: 'Reference', exact: true })).toBeVisible();
+  await page.getByRole('searchbox').fill('missing-result');
+  await expect(page.getByRole('link', { name: 'Reference', exact: true })).toHaveCount(0);
+  await page.getByRole('searchbox').fill('engineering');
+  await expect(page.getByRole('link', { name: 'Reference', exact: true })).toBeVisible();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export JSON', exact: true }).click()]);
+  const backup = JSON.parse(await readFile(await download.path(), 'utf8'));
+  expect(backup.format).toBe('linkshelf');
+  expect(backup.bookmarks).toHaveLength(1);
+  await page.getByRole('button', { name: 'Import', exact: true }).click();
+  await page.locator('#import-file').setInputFiles({ name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup)) });
+  await expect(page.locator('#import-preview')).toContainText('1 duplicate');
+  await expect(page.getByRole('button', { name: 'Import bookmarks', exact: true })).toBeDisabled();
+  await page.locator('#import-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(errors).toEqual([]);
+});
