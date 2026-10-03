@@ -1,0 +1,20 @@
+{
+  "roots": {
+    "bookmark_bar": {
+      "name": "Bookmarks bar",
+      "children": [
+        {
+          "type": "folder",
+          "name": "Reading",
+          "children": [
+            {
+              "type": "url",
+              "name": "Example article",
+              "url": "https://example.com/article"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

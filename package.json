@@ -1,0 +1,21 @@
+{
+  "name": "linkshelf",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^29.1.1",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.3"
+  },
+  "license": "MIT",
+  "description": "A local-first bookmark workspace with collections, tags, and portable imports"
+}
