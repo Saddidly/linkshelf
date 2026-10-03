@@ -10,6 +10,11 @@ Local evidence recorded on 2026-10-03.
 
 Windows Node.js 22.14.0 and Chromium. Browser tests used a clean automation profile and synthetic data. Safari/Firefox, private-mode storage, and device-level accessibility have not been exercised.
 
-The checked-in CI workflow is ready to run when published. It is configuration,
-not evidence of a hosted pass. Re-run README commands after changing dependencies
-or moving to another platform. Screenshots, where included, use synthetic data.
+## Hosted evidence
+
+[GitHub Actions run](https://github.com/Saddidly/linkshelf/actions/runs/37111957823) passed on 2026-10-03 for code revision `fa0f30fa6b2e6c0d8245bebf0b459a12f250a7a9`.
+
+Ubuntu, Node 22; unit tests, production build, and Chromium desktop/mobile flows covering persistence, validation, search, export, and duplicate import.
+
+These checks cover the named environments and cases, not every possible input or platform. Re-run README commands after changing dependencies or moving to another platform. Screenshots and acceptance data are synthetic.
+
